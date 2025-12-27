@@ -107,20 +107,31 @@ EOF
 )"
 ```
 
-### Step 5: Report Success
+### Step 5: Rebase development onto main
+
+```bash
+git checkout development
+git rebase main
+git push origin development --force-with-lease
+```
+
+This keeps development's history in sync with main by replaying development's commits on top of main.
+
+### Step 6: Report Success
 
 Report:
 - ✅ Released version v<VERSION>
 - 📦 GitHub release: https://github.com/OWNER/REPO/releases/tag/v<VERSION>
-- 📋 Reminder: Development branch will naturally stay ahead of main with continued work
+- 🔄 Development rebased onto main with shared history
 
 ## Important Rules
 
 1. **ALWAYS use `gh pr merge` to merge PRs** - NEVER use local `git merge` to merge into main
 2. **ALWAYS ask user to confirm version number** - Don't guess
 3. **ALWAYS use annotated tags** (`git tag -a`) - Include metadata
-4. **NEVER force push** - Releases are permanent
-5. **NEVER use local git merge commands** - All merges happen via GitHub PR mechanism
+4. **ALWAYS rebase development onto main after release** - Keep history in sync
+5. **Use `--force-with-lease` when rebasing development** - Safe force push
+6. **NEVER use local git merge commands** - All merges happen via GitHub PR mechanism
 
 ## Workflow Summary
 
@@ -134,6 +145,7 @@ Report:
 7. Tag the merge commit
 8. Push the tag
 9. Create GitHub release
+10. Rebase development onto main to sync history
 ```
 
 ## Example Usage
