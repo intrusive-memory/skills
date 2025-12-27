@@ -20,14 +20,16 @@ Use this skill when:
 
 Before starting the release process, verify:
 
-### 1. PR is Already Merged
+### 1. Find the PR to Release
 
 ```bash
-# Check if there's a recently merged PR
-gh pr list --state merged --limit 5 --json number,title,mergedAt,mergeCommit
+# Check for open PRs ready to merge
+gh pr list --state open --base main --json number,title,statusCheckRollup
 ```
 
-**If no recently merged PR exists, STOP and ask: "Which PR should be released?"**
+**If no open PR exists, STOP and ask: "Which PR should be released?"**
+
+**If PR has failing checks, STOP and report: "PR has failing CI checks. Fix them before releasing."**
 
 ### 2. Determine Next Version Number
 
@@ -47,20 +49,28 @@ The next version is always the last tag + 1:
 
 Once pre-flight checks pass:
 
-### Step 1: Checkout main and pull the merge commit
+### Step 1: Merge the PR (DO NOT USE LOCAL GIT MERGE)
+
+```bash
+gh pr merge <PR_NUMBER> --merge --delete-branch=false --subject "..." --body "..."
+```
+
+**CRITICAL**: ALWAYS use `gh pr merge` to merge into main, NEVER use local `git merge`.
+
+### Step 2: Checkout main and pull the merge commit
 
 ```bash
 git checkout main
 git pull origin main
 ```
 
-### Step 2: Verify we're on the merge commit
+### Step 3: Verify we're on the merge commit
 
 ```bash
 git log -1 --oneline
 ```
 
-### Step 3: Create and push the tag
+### Step 4: Create and push the tag
 
 ```bash
 git tag -a "v<VERSION>" -m "$(cat <<'EOF'
@@ -97,40 +107,33 @@ EOF
 )"
 ```
 
-### Step 5: Sync development with main
-
-```bash
-git checkout development
-git merge main
-git push origin development
-```
-
-### Step 6: Report Success
+### Step 5: Report Success
 
 Report:
 - ✅ Released version v<VERSION>
 - 📦 GitHub release: https://github.com/OWNER/REPO/releases/tag/v<VERSION>
-- 🔄 Development branch synced with main
+- 📋 Reminder: Development branch will naturally stay ahead of main with continued work
 
 ## Important Rules
 
-1. **NEVER merge a PR in this skill** - This skill assumes PR is already merged
+1. **ALWAYS use `gh pr merge` to merge PRs** - NEVER use local `git merge` to merge into main
 2. **ALWAYS ask user to confirm version number** - Don't guess
-3. **ALWAYS sync development with main** - Keep branches in sync
-4. **ALWAYS use annotated tags** (`git tag -a`) - Include metadata
-5. **NEVER force push** - Releases are permanent
+3. **ALWAYS use annotated tags** (`git tag -a`) - Include metadata
+4. **NEVER force push** - Releases are permanent
+5. **NEVER use local git merge commands** - All merges happen via GitHub PR mechanism
 
 ## Workflow Summary
 
 ```
-1. Verify PR is merged
-2. Determine next version (last tag + 1)
-3. Ask user to confirm version
-4. Checkout main and pull
-5. Tag the merge commit
-6. Push the tag
-7. Create GitHub release
-8. Sync development with main
+1. Find open PR ready to merge
+2. Verify PR has passing CI checks
+3. Determine next version (last tag + 1)
+4. Ask user to confirm version
+5. Merge PR using gh pr merge (NEVER local git merge)
+6. Checkout main and pull the merge commit
+7. Tag the merge commit
+8. Push the tag
+9. Create GitHub release
 ```
 
 ## Example Usage
