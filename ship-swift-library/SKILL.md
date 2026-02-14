@@ -1,13 +1,16 @@
 ---
-skill: ship-swift-library
-description: Ship and release Swift library versions by merging PR first, bumping version, tagging from PR merge commit, and creating GitHub releases
+name: ship-swift-library
+description: Ship and release Swift library versions by bumping the version on development, merging the PR once CI passes, then tagging and creating a GitHub release from main
+allowed-tools: Bash, Read, Grep, Glob, Edit, Skill
+dependencies:
+  - organize-agent-docs
 ---
 
 # Ship Swift Library Skill
 
 This skill handles the complete release process for Swift libraries.
 
-**CRITICAL RULE**: ALWAYS merge the open PR FIRST, then create the release from the PR merge commit. NEVER merge development directly to main when a PR exists.
+**CRITICAL RULE**: Bump the version on `development` BEFORE merging the PR. The version bump ships as part of the PR merge to `main`. NEVER merge development directly to main when a PR exists.
 
 ## Process Overview
 
@@ -21,20 +24,81 @@ Check if there's an open PR from `development` to `main`:
 gh pr list --base main --head development
 ```
 
-**If PR exists**: Proceed to step 2 (merge it FIRST)
+**If PR exists**: Proceed to step 2
 **If no PR**: Ask user if they want to create one
 
-### 2. Verify CI Checks Pass
+### 2. Determine Version Number
 
-Check the PR status and ensure all required checks have passed:
+Find the current version (usually `Sources/<LibraryName>/<LibraryName>.swift`):
+
+```swift
+public static let version = "X.Y.Z"
+```
+
+Ask the user what version this release should be. Version increment rules:
+- **Patch** (x.y.Z): Bug fixes, small improvements
+- **Minor** (x.Y.0): New features, non-breaking changes
+- **Major** (X.0.0): Breaking changes
+
+### 3. Bump Version and Audit Documentation
+
+Make sure you're on the `development` branch, then update the version:
+
+```bash
+git checkout development
+git pull origin development
+```
+
+Edit the version file (e.g. `Sources/<LibraryName>/<LibraryName>.swift`).
+
+**Then organize and update project documentation** using the organize-agent-docs skill:
+
+```
+/organize-agent-docs
+```
+
+This will:
+- Ensure AGENTS.md contains universal project documentation (architecture, APIs, dependencies)
+- Ensure CLAUDE.md contains only Claude-specific instructions (tool preferences, build requirements)
+- Ensure GEMINI.md contains only Gemini-specific instructions
+- Update version numbers across all documentation
+- Verify documentation structure follows best practices
+- Check that agent-specific files properly reference AGENTS.md
+
+**After running organize-agent-docs**, also update README.md:
+- Update version numbers in installation examples
+- Verify all code examples work with current API
+- Add new features to feature list
+- Update platform requirements (iOS/macOS/Swift/Xcode versions)
+- Verify all doc links point to existing files
+
+Commit everything together — version bump + doc updates — in a single commit:
+
+```bash
+git add Sources/<LibraryName>/<LibraryName>.swift README.md AGENTS.md CLAUDE.md GEMINI.md
+git commit -m "Bump version to X.Y.Z and update documentation
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+git push origin development
+```
+
+**Important**: The version bump and doc updates are now part of the PR diff and will be included when the PR is merged.
+
+### 4. Verify CI Checks Pass
+
+Wait for CI to run on the updated PR (the version bump push triggers a new CI run):
 
 ```bash
 gh pr checks <PR_NUMBER>
 ```
 
-If any checks fail, inform the user and do not proceed. If pending, wait for completion.
+If any checks fail, inform the user and do not proceed. If checks are pending, poll until they complete:
 
-### 3. Merge Pull Request FIRST
+```bash
+gh pr checks <PR_NUMBER> --watch
+```
+
+### 5. Merge Pull Request
 
 **CRITICAL**: Squash merge the PR to keep main branch history clean:
 
@@ -45,74 +109,31 @@ gh pr merge <PR_NUMBER> --squash --delete-branch=false
 **Important**:
 - Use `--squash` (clean single commit on main)
 - Do NOT delete development branch (it's long-lived)
+- The squash commit on main now contains the version bump
 
-### 4. Pull PR Merge Commit
-
-Fetch the PR merge commit from main:
+### 6. Pull Merge Commit to Local Main
 
 ```bash
 git checkout main
 git pull origin main
 ```
 
-Verify you're on the PR merge commit:
+Verify you're on the squash merge commit:
 
 ```bash
 git log --oneline -1
-# Should show: "Merge pull request #X from ..."
 ```
 
-### 5. Bump Version Number
+### 7. Create Annotated Tag on Main
 
-Find the version file (usually `Sources/<LibraryName>/<LibraryName>.swift`) and increment the version:
-
-```swift
-public static let version = "X.Y.Z"  // Increment appropriately
-```
-
-Version increment rules:
-- **Patch** (x.y.Z): Bug fixes, small improvements
-- **Minor** (x.Y.0): New features, non-breaking changes
-- **Major** (X.0.0): Breaking changes
-
-Commit the version bump:
-
-```bash
-git add Sources/<LibraryName>/<LibraryName>.swift
-git commit -m "Bump version to X.Y.Z
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
-```
-
-### 6. Push Version Bump to Development
-
-Push the version bump to development branch first:
-
-```bash
-git checkout development
-git cherry-pick <version_bump_commit>
-git push origin development
-```
-
-Then merge to main (or push directly if on main):
-
-```bash
-git checkout main
-git push origin main
-```
-
-### 7. Create Annotated Tag from PR Merge Commit
-
-Tag the current commit on main (which is the PR merge + version bump):
+Tag the squash merge commit on main:
 
 ```bash
 git tag -a vX.Y.Z -m "Release vX.Y.Z: <Short description>
 
 <Detailed release notes>
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+Generated with [Claude Code](https://claude.com/claude-code)"
 
 git push origin vX.Y.Z
 ```
@@ -131,28 +152,28 @@ gh release create vX.Y.Z \
 
 <Description of what this release adds>
 
-### ✨ New Features
+### New Features
 
 - Feature 1
 - Feature 2
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 - Fix 1
 - Fix 2
 
-### 📊 Testing
+### Testing
 
 - X tests passing
 - CI status
 
-### 📚 Documentation
+### Documentation
 
 - Updated docs
 
 ---
 
-**Full Changelog**: https://github.com/<owner>/<repo>/compare/vX.Y.Z-1...vX.Y.Z
+**Full Changelog**: https://github.com/<owner>/<repo>/compare/vPREVIOUS...vX.Y.Z
 EOF
 )"
 ```
@@ -172,11 +193,12 @@ Verify:
 
 ### 10. Sync Development Branch
 
-Ensure development is up to date:
+Ensure development has the squash merge from main (avoids future merge conflicts):
 
 ```bash
 git checkout development
-git pull origin development
+git merge origin/main
+git push origin development
 ```
 
 ### 11. Summary Report
@@ -184,13 +206,19 @@ git pull origin development
 Provide final summary:
 
 ```
-✅ Release vX.Y.Z Complete
+Release vX.Y.Z Complete
 
-- Pull Request #<NUMBER> merged to main ✅
-- Version bumped to X.Y.Z ✅
-- Tag vX.Y.Z created from PR merge commit ✅
+- Version bumped to X.Y.Z on development ✅
+- Documentation organized with /organize-agent-docs ✅
+  - AGENTS.md: Universal project documentation
+  - CLAUDE.md: Claude-specific instructions only
+  - GEMINI.md: Gemini-specific instructions only
+- README.md updated (user-facing documentation) ✅
+- CI checks passed ✅
+- Pull Request #<NUMBER> merged to main (includes version bump + docs) ✅
+- Tag vX.Y.Z created on main ✅
 - GitHub release published ✅
-- Development branch synced ✅
+- Development branch synced with main ✅
 
 Release URL: https://github.com/<owner>/<repo>/releases/tag/vX.Y.Z
 
@@ -199,25 +227,21 @@ The library is now ready for use via Swift Package Manager.
 
 ## Critical Rules (NEVER VIOLATE)
 
-1. **ALWAYS merge PR FIRST** - Never `git merge development` when PR exists
-2. **Tag from squash merge commit** - Ensure release is based on PR, not direct merge
-3. **Use --squash** - Keep main branch history clean with single commits per PR
-4. **Don't delete development** - It's a long-lived branch
-5. **Push version bump to both branches** - Keep development and main in sync
+1. **Bump version BEFORE merging** - The version bump must be part of the PR
+2. **Organize docs with /organize-agent-docs** - Ensure proper separation of universal vs agent-specific documentation
+3. **Wait for CI after version bump** - Don't merge until the new CI run passes
+4. **Use --squash** - Keep main branch history clean with single commits per PR
+5. **Don't delete development** - It's a long-lived branch
+6. **Tag on main after merge** - The tag goes on the squash merge commit
+7. **Sync development after release** - Merge main back to avoid future conflicts
 
-## What Went Wrong Before
+## Correct Flow
 
-**WRONG FLOW** ❌:
-1. `git merge development` (bypassed PR)
-2. Create release
-3. Merge PR (after release!)
-
-**CORRECT FLOW** ✅:
-1. Merge PR FIRST
-2. Pull PR merge commit
-3. Bump version
-4. Tag from PR merge commit
-5. Create release
+```
+development: [features] -> [version bump] -> [/organize-agent-docs] -> (CI passes) -> PR merged
+main:        -----------------------------------------------------------------> [squash commit] -> [tag vX.Y.Z] -> [release]
+development: [merge main back] ------------------------------------------------->
+```
 
 ## Error Handling
 
