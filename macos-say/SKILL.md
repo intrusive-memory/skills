@@ -1,6 +1,7 @@
 ---
 name: macos-say
 description: Use macOS text-to-speech via the `say` command for voice feedback, audio narration, and spoken output.
+allowed-tools: Bash
 ---
 
 # macOS Say Command
