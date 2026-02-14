@@ -286,6 +286,163 @@ Based on the parsed command:
 
 ---
 
+## 3.5. Parallel Build Coordination Strategy
+
+When multiple agents work in parallel on the same codebase, **competing builds will cause file locks, conflicts, and potentially corrupt DerivedData**. The supervisor MUST coordinate build execution to prevent conflicts.
+
+### The Problem
+
+Multiple agents running `xcodebuild`, `swift build`, `gradle`, `npm build`, etc. simultaneously will:
+- Create file lock conflicts
+- Corrupt shared build artifacts (DerivedData, .build/, node_modules/, etc.)
+- Race on dependency resolution
+- Produce unreliable test results
+- Waste compute resources
+
+### The Solution: Build Gates at Phase Boundaries
+
+**Core Principle**: Agents write code and validate syntax. The supervisor coordinates builds at phase boundaries.
+
+#### During Parallel Execution (Within a Phase)
+
+Agents performing `code` type sprints:
+
+1. **Write code and unit tests** (production code, test files)
+2. **Validate syntax only** using language-specific tools:
+   - **Swift**: `swift -frontend -typecheck File.swift` (fast, no imports)
+   - **TypeScript**: `tsc --noEmit --skipLibCheck File.ts`
+   - **Python**: `python -m py_compile file.py`
+   - **Go**: `go vet file.go`
+   - **Rust**: `rustc --crate-type lib --emit metadata file.rs`
+3. **Do NOT run full builds** (`xcodebuild`, `swift build`, `cargo build`, etc.)
+4. **Report completion** when code is written and syntax-validated
+
+**Exit Criteria Format (During Phase)**:
+```
+Code complete:
+- ✓ FileCandidateTests.swift written
+- ✓ FileCandidate.swift written
+- ✓ Syntax validated: swift -frontend -typecheck FileCandidate.swift
+```
+
+#### At Phase Boundaries (Build Gates)
+
+When all agents in a phase complete their sprints, the **supervisor** runs a single coordinated build:
+
+1. **Wait for all agents** in the current phase to report completion
+2. **Run single build + test** for all changes together:
+   ```bash
+   # Swift/Xcode
+   xcodebuild test -scheme MyApp -destination 'platform=macOS'
+
+   # Node.js
+   npm run build && npm test
+
+   # Rust
+   cargo build --all && cargo test --all
+   ```
+3. **Verify all changes** integrate correctly
+4. **Attribute failures**: If tests fail, identify which sprint(s) caused issues
+5. **Fix and rebuild**: Agent fixes issues, supervisor reruns build
+
+**Build Checkpoint Timing**:
+- **After dependencies phase** (Sprint 1): Verify dependencies resolve
+- **After parallel development phases** (Sprints 2-N): Validate integration
+- **Final verification** (after all sprints): Full test suite
+
+#### Phase Structure Example
+
+```
+Sprint 1 (Dependencies)
+  ↓ BUILD CHECKPOINT ✓ (supervisor runs build)
+
+Parallel Phase: Sprints 2-7 (3 agents, NO builds)
+  Agent A: Sprints 2, 3, 4, 5 (syntax check only)
+  Agent B: Sprints 6, 7 (syntax check only)
+  Agent C: Sprint 9 (syntax check only)
+  ↓ BUILD CHECKPOINT ✓ (supervisor runs single build)
+
+Sequential Phase: Sprints 8, 10-12 (NO builds during)
+  ↓ BUILD CHECKPOINT ✓ (supervisor runs build)
+
+Integration Phase: Sprints 13-16
+  ↓ FINAL BUILD + FULL TEST SUITE ✓
+```
+
+### Benefits
+
+✅ **No build conflicts**: Only one build runs at a time (coordinated by supervisor)
+✅ **Faster execution**: No waiting for builds during development
+✅ **Integration validation**: Tests all changes together (more realistic)
+✅ **Clear failure attribution**: Single test run shows all failures
+✅ **Resource efficiency**: One build instead of N parallel builds
+
+### Syntax Validation Commands by Language
+
+| Language | Syntax Check Command | Notes |
+|----------|---------------------|-------|
+| Swift | `swift -frontend -typecheck File.swift` | Fast, no imports resolution |
+| Swift (with module) | `swiftc -typecheck File.swift -I /path/to/modules` | Slower, resolves imports |
+| TypeScript | `tsc --noEmit --skipLibCheck File.ts` | Skips lib checks for speed |
+| JavaScript | `node --check file.js` | Parse only, no execution |
+| Python | `python -m py_compile file.py` | Compiles to bytecode |
+| Go | `go vet file.go` | Static analysis |
+| Rust | `rustc --crate-type lib --emit metadata file.rs` | Type check only |
+| Java | `javac -proc:none File.java` | Compile without annotation processing |
+| C/C++ | `gcc -fsyntax-only file.c` | Parse only |
+
+### Implementation in Dispatch Prompts
+
+When dispatching agents for parallel `code` sprints:
+
+**Include in agent prompt**:
+```
+**Build Coordination**:
+You are working in parallel with other agents. DO NOT run full builds
+(xcodebuild, swift build, etc.).
+
+Instead, validate syntax only:
+  swift -frontend -typecheck YourFile.swift
+
+The supervisor will run a single coordinated build after all agents complete.
+
+Exit criteria:
+- Code written ✓
+- Unit tests written ✓
+- Syntax validated ✓
+```
+
+**Update verification**:
+- Verify syntax check command was run (check agent output)
+- Do NOT verify build success (that happens at phase boundary)
+- Mark sprint COMPLETED if code + tests written and syntax valid
+
+### Phase Boundary Build Protocol
+
+After all parallel agents complete:
+
+1. Log: `🏗️  Phase N complete. Running coordinated build...`
+2. Run build command: `xcodebuild test -scheme MyApp -destination 'platform=macOS'`
+3. If **success**: Log `✅ Build passed. Proceeding to next phase.`
+4. If **failure**:
+   - Parse test output to identify failing tests
+   - Map failures to sprints (which sprint's code caused the failure?)
+   - Log: `❌ Build failed. Failures attributed to: Sprint X, Sprint Y`
+   - Set affected sprints to BACKOFF
+   - Re-dispatch failed sprints with error context
+   - Re-run build after fixes
+
+### Exception: Single-Agent Sequential Execution
+
+If only one agent is working (no parallelism), builds CAN happen during sprints:
+- No conflict risk (only one build at a time)
+- Faster feedback loop
+- Standard sprint exit criteria apply
+
+Detect this case: If no other agents are RUNNING or DISPATCHED, allow builds in exit criteria.
+
+---
+
 ## 4. Core Loop — Event-at-a-Time Processing
 
 Once startup is complete (for `start` or `resume`), the supervisor operates as an **event processor**, not a monolithic scanner. Each iteration handles exactly one event, updates state, and determines the next action.
